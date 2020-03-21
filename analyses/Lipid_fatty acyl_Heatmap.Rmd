@@ -1,0 +1,164 @@
+---
+title: "Lipid Head Group Circular Dendrogram, All Lipids"
+author: "Melanie Odenkirk, Jeremy Ash"
+output:
+  html_document:
+    theme: united 
+---
+
+This file includes the visualization of fatty acyl related lipid dysregulation of two case comparisons (Case 1 and Case 2) against a control group. Here Log2FC of Control/Case are displayed for all # identified lipids to visualize fatty acyl associations. To focus on the visualization of significantly changing species with respect to their fatty acyl composition, any lipid that was not observed as being significant at a alpha = 0.05 cutoff is marked grey. Statistically significant species that are upregulated or downregulated in Case vs. Control comparisons are denoted red or blue; repsectively. Further, the magnitude of fold change observed is visualized with a red/blue gradient with darker hues indicating a larger fold change magnitude. 
+
+Using the discussed instrument platform, fatty acyl sn positioning was not annotated. Therefore, only fatty acyl presence is considered for grouping lipid species. Additional variation from backbone position or variation in double bond position/orientation is not accounted for. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache = T)
+library(httr)
+library(jsonlite)
+library(fingerprint)
+library(rcdk)
+library(ggplot2)
+library(ggtree)
+library(ape)
+library(phangorn)
+library(limma)
+library(digest)
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+
+knitr::opts_knit$set(root.dir = 'data/')
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+# Combine together negative and positve data sets for Case and Control comaprisons
+data_fn <- c("Case1_v_Ctrl", "Case2_v_Ctrl")
+
+fn <- data_fn[1]
+sig.df <- data.frame(matrix(nrow = 274, ncol = 2*length(data_fn)))
+for( i in 1 : length(data_fn)) {
+  fn <- data_fn[i]
+  df1 <- read.csv(paste0(fn, "_Negative.csv"))
+  df2<- read.csv(paste0(fn, "_Positive.csv"))
+  df <- rbind(df1, df2)
+  sig.df[,i] <- (df$Log2FC)
+  sig.df[,i+2]<- (df$Case_v_Ctrl_Flag) 
+  colnames(sig.df) <- c("Case1_v_Ctrl_Log2FC", "Case2_v_Ctrl_Log2FC","Case1_v_Ctrl_Flag", "Case2_v_Ctrl_Flag")
+}
+
+
+sig.df$Name <- df$Name
+sig.df <- sig.df[c(5, 1:4)]
+
+lipids <- sig.df$Name
+sig.df$Name <- gsub("/", "_", sig.df$Name)
+
+#Drop the Bs and keep the As for now
+sig.df$Name <- gsub("_[A]$", "", sig.df$Name)
+sig.df <- sig.df[!grepl("_[B]$", sig.df$Name), ]
+
+# Split the rows with multiple potential lipids ids into 
+# separate entries
+for (i in 1:nrow(sig.df)) {
+  lipids <- unlist(strsplit(sig.df$Name[i], ";"))
+  if (length(lipids) > 1) {
+    r <- sig.df[i, ]
+    sig.df <- sig.df[-i, ]
+    mat <- data.frame(matrix(NA, nrow = length(lipids), ncol = ncol(sig.df)))
+    colnames(mat) <- colnames(sig.df)
+    for (j in 1:length(lipids)) {
+      mat[j, ] <- data.frame(Name = lipids[j], r[-1])
+    }
+    mat$Name <- lipids
+    sig.df <- rbind(sig.df, mat)
+  }
+}
+
+
+sig.df <- unique(sig.df)
+
+duplicated(sig.df$Name)
+
+rownames(sig.df) <- sig.df$Name
+
+sig.df$Case1_v_Ctrl_Log2FC <- sig.df$Case1_v_Ctrl_Log2FC*abs(sig.df$Case1_v_Ctrl_Flag)
+sig.df$Case2_v_Ctrl_Log2FC <- sig.df$Case2_v_Ctrl_Log2FC*abs(sig.df$Case2_v_Ctrl_Flag)
+
+sig.df$Case1_v_Ctrl_Flag <- NULL
+sig.df$Case2_v_Ctrl_Flag <- NULL
+
+sig.df[sig.df == 0] <- NA
+
+ab.set <- sig.df$Name
+ab.set <- sub(".*\\(" , "", ab.set)
+ab.set <- sub("\\).*" , "", ab.set)
+ab.set <- sub(".*-" , "", ab.set)
+ab.set <- sub("d" , "", ab.set)
+ab.set <-strsplit(ab.set, split = "_")
+ab.set <- unlist(ab.set)
+ab.set <- unique(ab.set)
+names(ab.set) <- c("group")
+FA <- c("0:0", "12:0", "14:0", "15:0", "16:0", "16:1", "17:0", "18:0", "18:1", "18:2", "18:3", "20:0", "20:1", "20:3", "20:4", "22:0", "22:4", "22:6")
+ab.set <- ab.set[order(match(ab.set, FA))]
+
+lipid.set <- data.frame(stringsAsFactors = F)
+l <- ab.set[1]
+for(l in ab.set) {
+  tmp <- sig.df$Name[grepl(l, sig.df$Name)]
+  lipid.set <- rbind(lipid.set, cbind(tmp, rep(l, length(tmp))))
+}
+
+colnames(lipid.set) <- c("lipids", "group")
+length(unique(lipid.set$group))
+table(lipid.set$group)
+
+highfreq.groups <- unique(lipid.set$group)[table(lipid.set$group) > 10]
+
+lipid.set.trim <- lipid.set[lipid.set$group %in% highfreq.groups, ]
+table(droplevels(lipid.set.trim$group))
+lipid.set.trim<- filter(lipid.set.trim, group != "8:0")
+
+sig.df.full <- merge(lipid.set.trim, sig.df, by.x = "lipids", by.y = "Name")
+
+head(sig.df.full)
+
+sig.df.full <- sig.df.full[order(sig.df.full$group), ]
+sig.df.mat <- sig.df.full[, -(1:2)]
+sig.df.mat <- data.matrix(sig.df.mat)
+
+group <- data.frame(sig.df.full$group)
+group <- droplevels(group)
+table(group)
+
+length(group)
+
+row.names(group) <- paste0(sig.df.full$lipids, sig.df.full$group, sep = ".")
+row.names(sig.df.mat) <- paste0(sig.df.full$lipids, sig.df.full$group, sep = ".")
+
+dim(sig.df.mat)
+length(group)
+```
+
+```{r}
+breaks <- seq(from=min(range(-5)), to=max(range(5)), length.out=100000)
+midpoint <- which.min(abs(breaks - 0))
+rampCol1 <- colorRampPalette(c("#002060", "#0d78ca", "#00e8f0"))(midpoint)
+rampCol2 <- colorRampPalette(c("#ff0000","#b40000","#890000", "#330000"))(100000-(midpoint))
+rampCols <- c(rampCol1,rampCol2)
+# length(breaks) == length(paletteLength) + 1
+# use floor and ceiling to deal with even/odd length pallettelengths
+
+rampCols <- c(rampCol1,rampCol2)
+```
+
+
+```{r}
+
+pheatmap(sig.df.mat, color = rampCols, breaks = breaks,annotation_row = group, cellwidth = 50, cellheight = 10, treeheight_row = 100, treeheight_col = 100,  cluster_row = F, cluster_col = F, fontsize = 10, legend = T, filename = "FA_Heatmap_tail length order_ALL_Lipids.tiff")
+
+sig.df.nonzero <- sig.df.mat[!(rowSums(is.na(sig.df.mat))==NCOL(sig.df.mat)),] 
+
+pheatmap(sig.df.nonzero, color = rampCols, breaks = breaks,annotation_row = group, cellwidth = 50, cellheight = 10, treeheight_row = 100, treeheight_col = 100,  cluster_row = F, cluster_col = F, fontsize = 10, legend = T, filename = "FA_Heatmap_tail length order_SIG_Lipids.tiff")
+```

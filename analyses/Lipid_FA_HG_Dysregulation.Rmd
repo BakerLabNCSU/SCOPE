@@ -1,0 +1,248 @@
+---
+title: "Lipid Head Group and Fatty Acyl Dysregulation Patterns"
+author: "Melanie Odenkirk, Jeremy Ash"
+output:
+  html_document:
+    theme: united 
+---
+
+This file includes the visualization of fatty acyl variation across observed head groups of two case comparisons (Case 1 and Case 2) against a control group. Here Log2FC of Control/Case are displayed for all # identified lipids to visualize fatty acyl associations. To focus on the visualization of significantly changing species with respect to their fatty acyl composition, any lipid that was not observed as being significant at a alpha = 0.05 cutoff is marked grey. Statistically significant species that are upregulated or downregulated in Case vs. Control comparisons are denoted red or blue; repsectively. Further, the magnitude of fold change observed is visualized with a red/blue gradient with darker hues indicating a larger fold change magnitude. 
+
+As noted in the fatty acyl heatmap file, fatty acyl sn positioning and additional double bond characterization was not annotated. Therefore, only fatty acyl presence is considered for grouping lipid species. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment = "", tidy.opts = list(width.cutoff = 60), tidy = TRUE, echo = FALSE, include = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = 'data/')
+  library(httr)
+  library(jsonlite)
+  library(fingerprint)
+  library(rcdk)
+  library(ggplot2)
+  library(ggtree)
+  library(ape)
+  library(phangorn)
+  library(limma)
+  library(digest)
+  library(factoextra)
+  library(NbClust)
+  library(reshape2)
+  library(scales)
+  library(tibble)
+  library(data.table)
+  library(stringr)
+```
+
+
+```{r pressure, echo=FALSE, include=FALSE}
+# Combine together negative and positve data sets for Case and Control comaprisons
+data_fn <- c("Case1_v_Ctrl", "Case2_v_Ctrl")
+
+fn <- data_fn[1]
+sig.df <- data.frame(matrix(nrow = 274, ncol = 2*length(data_fn)))
+for( i in 1 : length(data_fn)) {
+  fn <- data_fn[i]
+  df1 <- read.csv(paste0(fn, "_Negative.csv"))
+  df2<- read.csv(paste0(fn, "_Positive.csv"))
+  df <- rbind(df1, df2)
+  sig.df[,i] <- (df$Log2FC)
+  sig.df[,i+2]<- (df$Case_v_Ctrl_Flag) 
+  colnames(sig.df) <- c("Case1_v_Ctrl_Log2FC", "Case2_v_Ctrl_Log2FC", "Case1_v_Ctrl_Flag", "Case2_v_Ctrl_Flag")
+}
+
+
+sig.df$Name <- df$Name
+sig.df <- sig.df[c(5, 1:4)]
+
+lipids <- sig.df$Name
+sig.df$Name <- gsub("/", "_", sig.df$Name)
+
+#Drop the Bs and keep the As for now
+sig.df$Name <- gsub("_[A]$", "", sig.df$Name)
+sig.df <- sig.df[!grepl("_[B]$", sig.df$Name), ]
+
+# Split the rows with multiple potential lipids ids into 
+# separate entries
+for (i in 1:nrow(sig.df)) {
+  lipids <- unlist(strsplit(sig.df$Name[i], ";"))
+  if (length(lipids) > 1) {
+    r <- sig.df[i, ]
+    sig.df <- sig.df[-i, ]
+    mat <- data.frame(matrix(NA, nrow = length(lipids), ncol = ncol(sig.df)))
+    colnames(mat) <- colnames(sig.df)
+    for (j in 1:length(lipids)) {
+      mat[j, ] <- data.frame(Name = lipids[j], r[-1])
+    }
+    mat$Name <- lipids
+    sig.df <- rbind(sig.df, mat)
+  }
+}
+
+
+sig.df <- unique(sig.df)
+
+duplicated(sig.df$Name)
+
+rownames(sig.df) <- sig.df$Name
+
+sig.df$Case1_v_Ctrl_Log2FC <- sig.df$Case1_v_Ctrl_Log2FC*abs(sig.df$Case1_v_Ctrl_Flag)
+sig.df$Case2_v_Ctrl_Log2FC <- sig.df$Case2_v_Ctrl_Log2FC*abs(sig.df$Case2_v_Ctrl_Flag)
+sig.df$Case1_v_Ctrl_Flag <- NULL
+sig.df$Case2_v_Ctrl_Flag <- NULL
+
+sig.df$Name <- NULL
+
+
+breaks <- seq(from=min(range(-10)), to=max(range(10)), length.out=100000)
+midpoint <- which.min(abs(breaks - 0))
+rampCol1 <- colorRampPalette(c("#002060",  "#00e8f0"))(midpoint)
+rampCol2 <- colorRampPalette(c("#ff0000","#b40000","#890000", "#330000"))(100000-(midpoint))
+rampCols <- c(rampCol1,rampCol2)
+
+```
+
+
+
+
+```{r, message=FALSE, warning=FALSE}
+lipids <- rownames(sig.df)
+head.group <- sub("(.*)\\(.*" , "\\1", lipids)
+hg1 <-as.data.frame(head.group)
+
+# Filter out low frequency head groups, and all strange linkers
+fil <- head.group %in% c("PC", "PE", "PI", "SM", "PG", "PS", "SQDG", "MGDG", "PA", "HexCer") & !grepl(".*-" , lipids) & !grepl("d" , lipids)
+head.group <- head.group[fil]; sig.df <- sig.df[fil, ]; lipids <- lipids[fil];
+
+fa <- lipids
+fa <- sub(".*\\(" , "", fa)
+fa <- sub("\\).*" , "", fa)
+fa <- sub(".*-" , "", fa)
+fa <- sub("d" , "", fa)
+fa1 <- sub("_" , "/", fa)
+fa.ls <- strsplit(fa1, split = c("/|:"), fixed = F)
+
+
+# inflate the fatty acid with all permutations of duplicates and triplicates
+for(i in seq_along(fa.ls)) {
+  if(length(fa.ls[[i]] == 2)) {
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(3:4, 1:2)]))
+    sig.df <- rbind(sig.df, sig.df[i, ])
+    head.group <- c(head.group, rep(head.group[i], 1))
+    fa <- c(fa, fa[i])
+  } else if(length(fa.ls[[i]] == 3)) {
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(5:6, 3:4, 1:2)]))
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(3:4, 5:6, 1:2)]))
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(3:4, 1:2, 5:6)]))
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(5:6, 1:2, 3:4)]))
+    fa.ls <-  c(fa.ls, list(fa.ls[[i]][c(1:2, 5:6, 3:4)]))
+    sig.df <- rbind(sig.df, do.call(rbind, replicate(5, sig.df[i, ], simplify=FALSE)))
+    head.group <- c(head.group, rep(head.group[i], 5))
+    fa <- c(fa, rep(fa[i], 5))
+  }
+}
+
+df <- data.frame(matrix(0, nrow = length(fa.ls), ncol = 6))
+
+for(i in seq_along(fa.ls)) {
+  df[i, 1:length(fa.ls[[i]])] <-  fa.ls[[i]]
+}
+df <- as.data.frame(df)
+
+FA1 <-paste(df$X1, df$X2, sep = ":")
+FA2 <-paste(df$X3, df$X4, sep = ":")
+fa <- paste(FA1, FA2, sep = "_")
+lipid <- paste(head.group, fa, sep = "(")
+lipid <- paste0(lipid, sep = ")")
+
+sig.df$Name = lipid
+duplicated(sig.df$Name)
+
+sig.df <- sig.df[-c(92, 118, 122, 142, 150, 152, 155, 156, 160, 162, 175, 178), ]
+
+rownames(sig.df) <- sig.df$Name
+
+
+#create heatmap
+
+hm <- data.frame(matrix(NA, nrow = length(sig.df), ncol = 10*2))
+colnames(hm) <- c("PC_Case1", "PC_Case2", "PE_Case1", "PE_Case2", "PI_Case1", "PI_Case2", "SM_Case1", "SM_Case2",  "PG_Case1", "PG_Case2",  "PS_Case1", "PS_Case2","SQDG_Case1", "SQDG_Case2","MGDG_Case1", "MGDG_Case2", "PA_Case1","PA_Case2", "HexCer_Case1", "HexCer_Case2")
+for(i in seq_along(row.names(sig.df))) {
+  if(fa[i] %in% rownames(hm)) {
+    j <- match(fa[i], rownames(hm))
+    k <- match(head.group[i], c("PC", "PE", "PI", "SM", "PG", "PS",  "SQDG", "MGDG", "PA", "HexCer"))
+    hm[j, (2*k-1):(2*k)] <- sig.df[i, c(1, 2)]
+    
+  } else {
+    k <- match(head.group[i], c("PC", "PE", "PI", "SM", "PG", "PS", "SQDG", "MGDG", "PA", "HexCer"))
+    hm[i, (2*k-1):(2*k)]<- sig.df[i, c(1, 2)]
+    rownames(hm)[i] <- fa[i]
+  }
+}
+
+hm <- hm[!(rowSums(is.na(hm))==NCOL(hm)),]
+
+
+
+dist1 <- read.csv("FA_across_HG_dist.csv", header = TRUE, row.names = 1)
+fa.dist <- dist(dist1)
+tupgma <- upgma(fa.dist, method="average")
+```
+
+
+## Case 1 vs. Control 
+
+
+```{r, echo=FALSE, fig.height=16, fig.width=12, message=FALSE, warning=FALSE, include = TRUE}
+p <- ggtree(tupgma, branch.length="none", alpha =0)
+p <- p %<+% sig.df +
+  geom_text(aes(label=label, fontface="bold"), hjust = 0, vjust = 0, size=3)
+p <- gheatmap(p, hm[1], offset=2, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[3], offset=6, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[5], offset=10, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[9], offset=14, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[11], offset=18, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[13], offset=22, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[15], offset=26,width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[17], offset=30, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p
+```
+
+
+
+
+
+## Case 2 vs. Control 
+
+
+```{r, echo=FALSE, fig.height=16, fig.width=12, message=FALSE, warning=FALSE, include = TRUE}
+p <- ggtree(tupgma, branch.length="none", alpha =0)
+p <- p %<+% sig.df +
+  geom_text(aes(label=label, fontface="bold"), hjust = 0, vjust = 0, size=3)
+p <- gheatmap(p, hm[2], offset=2, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[4], offset=6, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[6], offset=10, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[10], offset=14, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[12], offset=18, width=.15, font.size=3,  colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[14], offset=22, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[16], offset=26,width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p <- gheatmap(p, hm[18], offset=30, width=.15, font.size=3, colnames = T) +
+    scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", na.value = "grey90", midpoint = 0)
+p
+```
+
+

@@ -1,0 +1,88 @@
+---
+title: "ToxPi_Sample_Classification_by_Metadata"
+author: "Melanie Odenkirk"
+output:
+  html_document:
+    theme: united 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment = "", tidy.opts = list(width.cutoff = 60), tidy = TRUE, echo = FALSE, include = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = 'data/')
+
+library(dplyr)
+library(purrr)
+library(tidyr)
+library(reshape2)
+
+```
+
+
+```{r group patients by clinical variables, include = FALSE}
+clin <- read.csv("ToxPi_metadata_example.csv", header = TRUE)
+df <- read.csv("Log2_Lipid_Abundances.csv", header= TRUE)
+tdf <- t(df)
+colnames(tdf) <- tdf[1,]
+tdf = tdf[-1,]
+
+# Samples are subsetted by case group to focus on clinical effects and not overwhelm visualizations with disparities between case and control groups
+clin <- clin %>% mutate_if(is.numeric, round, 0)
+clin <- subset(clin, PD == "GDM")
+
+
+unique(clin$Age_yrs)
+
+clin_age <- clin %>% group_by(Age_yrs) %>%
+  mutate(Age = paste(unique(clin$Age_yrs), collapse = ' ')) %>%
+  separate(Age, into = paste0('Age', 1:20, fill = 'right', convert = TRUE))
+
+
+row.names(clin_age) <- clin_age$Subject.ID
+
+age <- clin_age[2]
+
+row.names(age) <- row.names(clin_age)
+
+# Samples grouped by clinical information. Here, age with 5 year increments is demonstrated.
+
+age_by_5 <- c(">20", "21-25", "26-30", "31-35", "36-40", "<41")
+
+age.by.5.data.frame <- data.frame(matrix(nrow = length(clin_age$Subject.ID), ncol = 6))
+rownames(age.by.5.data.frame) <- clin_age$Subject.ID
+colnames(age.by.5.data.frame) <- age_by_5
+
+age.by.5.data.frame$">20" <- ifelse(clin$Age_yrs %in% c(16,18,19,20), yes = "X",no = NA)
+age.by.5.data.frame$"21-25" <- ifelse(clin$Age_yrs %in% c(21,22,23,24,25), yes = "X",no = NA)
+age.by.5.data.frame$"26-30" <- ifelse(clin$Age_yrs %in% c(26,27,28,29,30), yes = "X",no = NA)
+age.by.5.data.frame$"31-35" <- ifelse(clin$Age_yrs %in% c(31,32,33,34,35), yes = "X",no = NA)
+age.by.5.data.frame$"36-40" <- ifelse(clin$Age_yrs %in% c(36,37,38,39,40), yes = "X",no = NA)
+age.by.5.data.frame$"<41" <- ifelse(clin$Age_yrs %in% c(41,42,43,44), yes = "X",no = NA)
+
+
+group_by_age_5 <- merge(age.by.5.data.frame, tdf, by = 'row.names', all= TRUE)
+group_by_age_5 <- group_by_age_5[,colSums(is.na(group_by_age_5))<nrow(group_by_age_5)]
+t_group_by_age_5 <- t(group_by_age_5)
+write.csv(t_group_by_age_5, "ToxPi_age_by_5_disease_grouping.csv")
+
+# Example of grouping by increments of 10
+
+
+#age_by_10 <- c(">20", "21-30",  "31-40", "<41")
+
+#age.by.10.data.frame <- data.frame(matrix(nrow = length(clin_age$Subject.ID), ncol = 4))
+#rownames(age.by.10.data.frame) <- clin_age$Subject.ID
+#colnames(age.by.10.data.frame) <- age_by_10
+
+#age.by.10.data.frame$">20" <- ifelse(clin$Age_yrs %in% c(16,18,19,20), yes = "X",no = NA)
+#age.by.10.data.frame$"21-30" <- ifelse(clin$Age_yrs %in% c(21,22,23,24,25,26,27,28,29,30), yes = "X",no = NA)
+#age.by.10.data.frame$"31-40" <- ifelse(clin$Age_yrs %in% c(31,32,33,34,35,36,37,38,39,40), yes = "X",no = NA)
+#age.by.10.data.frame$"<41" <- ifelse(clin$Age_yrs %in% c(41,42,43,44), yes = "X",no = NA)
+
+
+#group_by_age_10 <- merge(age.by.10.data.frame, tdf, by = 'row.names', all= TRUE)
+#group_by_age_10 <- group_by_age_10[,colSums(is.na(group_by_age_10))<nrow(group_by_age_10)]
+#t_group_by_age_10 <- t(group_by_age_10)
+#write.csv(t_group_by_age_10, "ToxPi_age_by_10_disease_grouping.csv")
+  
+```
+

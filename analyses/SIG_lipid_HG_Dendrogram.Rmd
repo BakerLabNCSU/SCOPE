@@ -1,0 +1,143 @@
+---
+title: "Lipid Head Group Circular Dendrogram, All Lipids"
+author: "Melanie Odenkirk, Jeremy Ash"
+output:
+  html_document:
+    theme: united 
+---
+
+This file includes the visualization of head-group related lipid dysregulation of two case comparisons (Case 1 and Case 2) against a control group. Here Log2FC of Control/Case are displayed for all # identified lipids to visualize head group associations. To focus on the visualization of significantly changing species with respect to their head group annotations, any lipid that was not observed as being significant at a alpha = 0.05 cutoff is marked grey. Statistically significant species that are upregulated or downregulated in Case vs. Control comparisons are denoted red or blue; repsectively. Further, the magnitude of fold change observed is visualized with a red/blue gradient with darker hues indicating a larger fold change magnitude. 
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache = T)
+# You will need to replace with the path to the data directory on your machine
+knitr::opts_knit$set(root.dir = 'data/')
+  library(httr)
+  library(jsonlite)
+  library(fingerprint)
+  library(rcdk)
+  library(ggplot2)
+  library(ggtree)
+  library(ape)
+  library(phangorn)
+  library(limma)
+  library(digest)
+  library(factoextra)
+  library(NbClust)
+  library(reshape2)
+  library(scales)
+  library(tidyverse)
+```
+
+
+```{r, include=FALSE}
+#Loading lipid clustering
+load("fp_sig_lipid.rdata")
+tupgma <- upgma(fp.dist, method = "average")
+```
+
+
+## Building Log2FC heatmaps of statistically significant lipids
+```{r pressure, echo=FALSE, include=FALSE}
+data_fn <- c("Case1_v_Ctrl", "Case2_v_Ctrl")
+
+fn <- data_fn[1]
+sig.df <- data.frame(matrix(nrow = 274, ncol = 2*length(data_fn)))
+for( i in 1 : length(data_fn)) {
+  fn <- data_fn[i]
+  df1 <- read.csv(paste0(fn, "_Negative.csv"))
+  df2<- read.csv(paste0(fn, "_Positive.csv"))
+  df <- rbind(df1, df2)
+  sig.df[,i] <- (df$Log2FC)
+  sig.df[,i+2]<- (df$Case_v_Ctrl_Flag) 
+  colnames(sig.df) <- c("Case1_v_Ctrl_Log2FC", "Case2_v_Ctrl_Log2FC","Case1_v_Ctrl_Flag", "Case2_v_Ctrl_Flag")
+}
+
+
+sig.df$Name <- df$Name
+sig.df <- sig.df[c(5, 1:4)]
+
+lipids <- sig.df$Name
+
+sig.df <- unique(sig.df)
+
+rownames(sig.df) <- sig.df$Name
+
+sig.df$Name <- NULL
+
+sig.df$Case1_v_Ctrl_Log2FC <- sig.df$Case1_v_Ctrl_Log2FC*abs(sig.df$Case1_v_Ctrl_Flag)
+sig.df$Case2_v_Ctrl_Log2FC <- sig.df$Case2_v_Ctrl_Log2FC*abs(sig.df$Case2_v_Ctrl_Flag)
+
+sig.df[sig.df == 0] <- NA
+
+breaks <- seq(from=min(range(-5)), to=max(range(5)), length.out=10000)
+midpoint <- which.min(abs(breaks - 0))
+rampCol1 <- colorRampPalette(c("#002060", "#0d78ca", "#00e8f0"))(midpoint)
+rampCol2 <- colorRampPalette(c("#FF4D4D", "red", "darkred"))(10000-(midpoint+1))
+rampCols <- c(rampCol1,rampCol2)
+
+```
+
+##Lipid Dendogram -- Identifications annotated
+
+```{r, echo=FALSE, fig.height=12, fig.width=12, message=FALSE, warning=FALSE, include = FALSE}
+p<- ggtree(tupgma, layout="circular", size=1, branch.length="none")
+p <- p + geom_text(aes(label=label, angle=angle, fontface="bold"), hjust=-0.15, size=1.65)
+p <- open_tree(p, angle = 3)
+p <- gheatmap(p, sig.df [1], offset=20, width=.25, font.size=1.5, colnames = F)+
+scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "white", na.value = "grey70", midpoint = 0)
+p <- gheatmap(p, sig.df [2], offset=30, width=.25, font.size=1.5, colnames = F)+
+scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "white", na.value = "grey70", midpoint = 0)
+p
+```
+
+## Integrating node annotation by lipid class
+```{r, echo=FALSE}
+
+sig.df_1 <- sig.df
+cmpds <- read.csv("lipid_HG_color_classification.csv", header= TRUE)
+
+#color by the property (Using HG classification)
+sortMat2 = cmpds
+
+#colorby property (Property is desc. col. name like p-value)
+HG = cmpds$HG
+
+cols10 =c("Car" = "olivedrab3","CE" = "purple", "Cer" = "black", "DG" = "gold3", "HexCer" = "darkcyan" ,"MG"= "grey", "LPC" = "forestgreen", "PC" = "forestgreen", "PC O-" = "forestgreen", "PC P-" = "forestgreen", "LPE" = "maroon", "PE" = "maroon", "PE P-" = "maroon", "PI" = "dodgerblue1","SM" = "ghostwhite","TG" = "navy", "PE O-" = "maroon", "PG" = "firebrick2", "PS" = "darkorange", "CL" = "turquoise2", "GM3" = "salmon", "PA" = "pink", "MGDG" ="blue", "SQDG" = "magenta2")
+
+to_plot3= as.data.frame(cbind(sig.df_1[,c("Case1_v_Ctrl_Log2FC")], 
+                              sig.df_1[,c("Case2_v_Ctrl_Log2FC")])) 
+names(to_plot3)=c("Case1","Case2")
+rownames(to_plot3) = rownames(sig.df_1)
+```
+
+## Case vs. Control dendrogram
+
+```{r, echo=FALSE, fig.height=16, fig.width=16, message=FALSE, warning=FALSE, include = TRUE}
+#Generate Circular Dendrogram
+t4 <- ggtree(tupgma, layout="circular", size=1.5) 
+#%<+% is a pipe symbol to combine datasets more efficiently
+#merging circ. dend. w/ pvalue color assignments
+t4 <- t4 %<+% cmpds +
+ geom_tippoint(aes(color=HG), size=3.5, alpha = 0.6, shape = 16)+
+  scale_color_manual(values =cols10) +
+  theme(legend.position="bottom",legend.text=element_text(size=10))+
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))+
+  theme(text = element_text(size = 0.01)) +
+  geom_treescale(x = NULL, y = NULL, width = 0.5, offset = 30,
+                 color = "white", linesize = 1E-100, fontsize = 1E-100)
+#plots circular dendrogram with layered heatmap
+t4 <- gheatmap(t4, to_plot3[2], offset = 0, width = 0.12, colnames =T, colnames_angle = 50)  +
+  scale_fill_gradient2(low = rampCol1, high = rampCol2,  mid = "white", na.value = "grey70", midpoint = 0)
+t4 <- gheatmap(t4, to_plot3[1], offset = 0.05, width = 0.12, colnames =T, colnames_angle = 50)  +
+  scale_fill_gradient2(low = rampCol1, high = rampCol2,  mid = "white", na.value = "grey70", midpoint = 0)
+
+
+open_tree(t4, 50) %>% rotate_tree(50)
+```
+
+
+
+

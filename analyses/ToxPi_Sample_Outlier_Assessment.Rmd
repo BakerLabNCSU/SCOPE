@@ -1,0 +1,179 @@
+---
+title: "ToxPi Sample Clustering"
+author: "Melanie Odenkirk"
+output:
+  html_document:
+    theme: united 
+---
+
+Example dataset for mapping metadata to sample profile clustering. Patient profiles of the top 20 significant lipids are uploaded into ToxPi software following a variance transformation to correct for lipid variability across species. Results are then uploaded here, scaling max/min values are removed, and clinical information in the form of categorical variables (Other infections) and numerical variables (Log(sample collection time relative to delivery)) are mapped onto sample clustering. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(comment = "", tidy.opts = list(width.cutoff = 60), tidy = TRUE, echo = FALSE, include = FALSE, warning = FALSE)
+knitr::opts_knit$set(root.dir = 'data/')
+
+  library(httr)
+  library(jsonlite)
+  library(fingerprint)
+  library(rcdk)
+  library(ggplot2)
+  library(ggtree)
+  library(ape)
+  library(phangorn)
+  library(limma)
+  library(digest)
+  library(factoextra)
+  library(NbClust)
+  library(reshape2)
+  library(scales)
+  library(dplyr)
+  library(yarrr)
+  library(plotrix)
+  library(pdist)
+  library(dendextend)
+```
+
+
+```{r, transform data}
+ToxPI_results <- read.csv("Patient_Clustering_ToxPi_results.csv", header = TRUE, check.names = FALSE)
+
+ToxPI_results <- ToxPI_results[-c(90,1), ] 
+
+
+rownames(ToxPI_results) <- ToxPI_results$Name #Makes ToxPI_results row names the patient names
+
+Names <-data.frame(ToxPI_results$Name)
+
+ToxPI_results$`HClust Group` <- NULL
+ToxPI_results$`KMeans Group` <- NULL
+ToxPI_results$Source <- NULL
+ToxPI_results$Name <- NULL
+
+
+t_ToxPI_results <- t(ToxPI_results)
+
+```
+
+Plotting ToxPi profiles in R
+```{r, recreate individual patient ToxPIs}
+
+#par(mfrow = c(2,2))
+#loop.vector <- 1:186
+#for (i in loop.vector) {
+#x<- t_ToxPI_results[,i]
+      #radial.pie(x, show.grid.labels = FALSE, labels = t_ToxPI_results[,i], )
+#}
+
+
+#invisible(lapply(colnames(t_ToxPI_results),function(x){
+     # pie(t_ToxPI_results[,x],main=x,type="l")
+   # }))
+
+```
+
+Assembling Patient ToxPi Distance Matrix
+```{r, circular dendrogram}
+dist_mat <- dist(ToxPI_results, method = 'euclidean')
+tupgma <- upgma(dist_mat, method = "average")
+
+```
+
+
+##Integrating code from George
+```{r, echo=FALSE}
+#load all desc.
+clinical_info <- read.csv("ToxPi_metadata_example.csv", header= TRUE)
+sortMat2 = clinical_info
+
+#colorby property (Property is desc. col. name like disease classification)
+PD = clinical_info$PD
+
+cols3 =c("GDM" = "deepskyblue", "PRE" = "goldenrod2")
+
+```
+
+```{r, echo=FALSE, fig.height=12, fig.width=12, message=FALSE, warning=FALSE, include = TRUE}
+#Generate Circular Dendrogram
+t4 <- ggtree(tupgma, layout="circular", size=1.2)
+#%<+% is a pipe symbol to combine datasets more efficiently
+#merging circ. dend. w/ pvalue color assignments
+t4 <- t4 %<+% clinical_info +
+  geom_tippoint(aes(color=PD), alpha=0.75, size=4, shape = 15)+
+  geom_text(aes(label=label, angle=angle, fontface="bold"), hjust=-0.15, size=3)+
+  scale_color_manual(values =cols3) +
+  theme(legend.position="bottom",legend.text=element_text(size=10))+
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))+
+  theme(text = element_text(size = 1)) +
+  geom_treescale(x = NULL, y = NULL, width = 0.5, offset = 30,
+                 color = "white", linesize = 1E-100, fontsize = 1E-100)
+
+open_tree(t4, angle = 20)
+
+```
+
+
+```{r}
+to_plot2= clinical_info
+rownames(to_plot2) = clinical_info$Subject.ID
+```
+
+
+# Other infections effects on molecular profile clustering
+
+```{r, fig.height=12, fig.width=12, message=FALSE, warning=FALSE, include = TRUE}
+
+colors <- c("grey80", "grey30")
+
+#Generate Circular Dendrogram
+t4 <- ggtree(tupgma, layout="circular", hjust = -.15, size=1.65)
+#%<+% is a pipe symbol to combine datasets more efficiently
+#merging circ. dend. w/ pvalue color assignments
+t4 <- t4 %<+% clinical_info +
+  geom_tippoint(aes(color=PD), alpha=0.75, size=6, shape = 18)+
+  scale_color_manual(values =cols3) +
+  theme(legend.position="bottom",legend.text=element_text(size=10))+
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))+
+  theme(text = element_text(size = 1)) +
+  geom_treescale(x = NULL, y = NULL, width = 0.05, offset = 30,
+                 color = "white", linesize = 1E-100, fontsize = 0.01)
+t4 <- gheatmap(t4, to_plot2[4], offset = .01, width = 0.12, font.size = 4, colnames = T, colnames_angle = 50)  +
+  scale_fill_gradientn(colors = colors, na.value = "black")
+
+open_tree(t4, 50) %>% rotate_tree(50)
+```
+
+
+
+# Time between sample collection and delivery on molecular profile clustering_POS
+
+```{r, fig.height=12, fig.width=12, message=FALSE, warning=FALSE, include = TRUE}
+breaks <- seq(from=min(range(-10)), to=max(range(10)), length.out=100000)
+midpoint <- which.min(abs(breaks - 0))
+rampCol1 <- colorRampPalette(c("#002060", "#0d78ca", "#00e8f0"))(midpoint)
+rampCol2 <- colorRampPalette(c("#ff0000","#b40000","#890000", "#330000"))(100000-(midpoint))
+rampCols <- c(rampCol1,rampCol2)
+
+
+#Generate Circular Dendrogram
+t4 <- ggtree(tupgma, layout="circular", hjust = -.15, size=1.65)
+#%<+% is a pipe symbol to combine datasets more efficiently
+#merging circ. dend. w/ pvalue color assignments
+t4 <- t4 %<+% clinical_info +
+  geom_tippoint(aes(color=PD), alpha=0.75, size=6, shape = 18)+
+  scale_color_manual(values =cols3) +
+  theme(legend.position="bottom",legend.text=element_text(size=10))+
+  theme(plot.margin = unit(c(0,0,0,0), "cm"))+
+  theme(text = element_text(size = 1)) +
+  geom_treescale(x = NULL, y = NULL, width = 0.05, offset = 30,
+                 color = "white", linesize = 1E-100, fontsize = 0.01)
+t4 <- gheatmap(t4, to_plot2[9], offset = .12, width = 0.15, colnames = FALSE)  +
+  scale_fill_gradient2(low = rampCol1, high = rampCol2, mid = "grey70", midpoint = 0)
+
+open_tree(t4, 50) %>% rotate_tree(50)
+```
+
+
+
+
+
