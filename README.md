@@ -1,5 +1,4 @@
-# Manuscript Title
-
+# Structural-based Connectivity and Omic Phenotype Evaluations (SCOPE): A Cheminformatics Toolbox for Investigating Lipidomic Changes in Complex Systems 
 *Melanie T. Odenkirk, Jeremy Ash, Phyo Phyo Kway Zin, David Reif, Denis Fourches, Erin S. Baker*
 
 ## Usage
